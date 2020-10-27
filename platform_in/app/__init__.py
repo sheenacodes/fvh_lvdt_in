@@ -74,24 +74,23 @@ def create_app(script_info=None):
 
     @app.route("/")
     def hello_world():
-        return jsonify(hello="world")
+        return jsonify(health="ok")
 
-    @app.route('/wrm247/v1/', methods=['POST'])
+    @app.route('/itracklvdt/v1', methods=['POST'])
     def post_movingvehicle_data():
         try:
-            print(request.data)
+            logging.info(request.headers)
+            logging.info(request.data)
             data = request.get_json()
+            logging.info(data)
+            #topic = "finnest.cesva.movingvehicle"
 
-            print(request.headers)
-            logging.debug(request.data)
-            topic = "finnest.cesva.movingvehicle"
-
-            kafka_avro_produce(avroProducer,topic,data)
+            #kafka_avro_produce(avroProducer,topic,data)
 
             return success_response_object,success_code
 
         except Exception as e:
-            avroProducer.flush()
+            #avroProducer.flush()
             elastic_apm.capture_exception()
             return failure_response_object,failure_code
 
