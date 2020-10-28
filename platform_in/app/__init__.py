@@ -79,10 +79,10 @@ def create_app(script_info=None):
     @app.route('/itracklvdt/v1', methods=['POST'])
     def post_movingvehicle_data():
         try:
-            logging.info(request.headers)
+            #logging.info(request.headers)
             logging.info(request.data)
             data = request.get_json()
-            logging.info(data)
+            #logging.info(data)
             #topic = "finnest.cesva.movingvehicle"
 
             #kafka_avro_produce(avroProducer,topic,data)
