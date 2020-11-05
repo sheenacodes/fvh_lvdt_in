@@ -4,40 +4,18 @@ from elasticapm.contrib.flask import ElasticAPM
 import logging
 from flask import jsonify, request
 import json
-from confluent_kafka import avro
-from confluent_kafka.avro import AvroProducer
-import certifi
+from datetime import datetime
+from datetime import timezone
+import requests
 
 logging.basicConfig(level=logging.INFO)
 elastic_apm = ElasticAPM()
 
-success_response_object = {"status":"success"}
+success_response_object = {"status": "success"}
 success_code = 202
-failure_response_object = {"status":"failure"}
+failure_response_object = {"status": "failure"}
 failure_code = 400
 
-def delivery_report(err, msg):
-    if err is not None:
-        logging.error(f"Message delivery failed: {err}")
-    else:
-        logging.debug(f"Message delivered to {msg.topic()} [{msg.partition()}]")
-
-def kafka_avro_produce(avroProducer, topic, data):
-
-    try:
-        avroProducer.produce(topic=topic, value=data)
-        logging.debug("avro produce")
-        avroProducer.poll(2)
-        if len(avroProducer) != 0:
-            return False
-    except BufferError:
-        logging.error("local buffer full", len(avroProducer))
-        return False
-    except Exception as e:
-        logging.error(e)
-        return False
-
-    return True
 
 def create_app(script_info=None):
 
@@ -50,22 +28,28 @@ def create_app(script_info=None):
 
     # set up extensions
     elastic_apm.init_app(app)
+    # db.init_app(app)
 
-    value_schema = avro.load("avro/movingvehicle.avsc")
-    avroProducer = AvroProducer(
-        {
-            "bootstrap.servers": app.config["KAFKA_BROKERS"],
-            "security.protocol": app.config["SECURITY_PROTOCOL"],
-            "sasl.mechanism": app.config["SASL_MECHANISM"],
-            "sasl.username": app.config["SASL_UNAME"],
-            "sasl.password": app.config["SASL_PASSWORD"],
-            "ssl.ca.location": certifi.where(),
-            #"debug": "security,cgrp,fetch,topic,broker,protocol",
-            "on_delivery": delivery_report,
-            "schema.registry.url": app.config["SCHEMA_REGISTRY_URL"]
-        },
-        default_value_schema=value_schema,
-    )
+    def get_ds_id(thing, sensor):
+        # """
+        # requests the datastream id corresponding to the thing and sensor links given
+        # returns -1 if not found
+        # """
+
+        payload = {"thing": thing, "sensor": sensor}
+        logging.debug(f"getting datastream id {payload}")
+        resp = requests.get(app.config["DATASTREAMS_ENDPOINT"], params=payload)
+        # resp = requests.get(
+        #     "http://host.docker.internal:1338/datastream", params=payload
+        # )
+        logging.debug(f"response: {resp.json()} ")
+
+        id = -1
+        ds = resp.json()["Datastreams"]
+        if len(ds) == 1:
+            id = ds[0]["datastream_id"]
+
+        return id
 
     # shell context for flask cli
     @app.shell_context_processor
@@ -76,22 +60,59 @@ def create_app(script_info=None):
     def hello_world():
         return jsonify(health="ok")
 
-    @app.route('/itracklvdt/v1', methods=['POST'])
-    def post_movingvehicle_data():
+    @app.route("/itracklvdt/v1", methods=["POST"])
+    def post_lvdt_data():
         try:
-            #logging.info(request.headers)
-            logging.info(request.data)
+            # logging.info(f"post observation: {request.text()}")
             data = request.get_json()
-            #logging.info(data)
-            #topic = "finnest.cesva.movingvehicle"
+            # uncomment for prod
+            logging.info(f"post observation: {data}")
 
-            #kafka_avro_produce(avroProducer,topic,data)
+            topic = "finest-observations-itracklvdt"
 
-            return success_response_object,success_code
+            thing = "wapicelvdt"
+            items_list = data["payload"]
+
+            dt_obj = datetime.utcnow()
+            result_timestamp_millisec = round(dt_obj.timestamp() * 1000)
+
+            for item in items_list:
+                sensor = item["name"].replace(" ", "-")
+                streams = zip(item["ts"], item["v"])
+                # handle status status not 200 - if not raise error
+                ds_id = get_ds_id(thing, sensor)
+                if ds_id == -1:
+                    logging.warning(f"no datastream id found for {thing} + {sensor}")
+
+                for stream in streams:
+                    observation = {
+                        "phenomenontime_begin": stream[0],
+                        "phenomenontime_end": None,
+                        "resulttime": result_timestamp_millisec,
+                        "result": f"{stream[1]}",
+                        "resultquality": None,
+                        "validtime_begin": None,
+                        "validtime_end": None,
+                        "parameters": None,
+                        "datastream_id": ds_id,
+                        "featureofintrest_link": None,
+                    }
+                    logging.info(observation)
+
+                payload = {"topic": topic, "observation": observation}
+
+                headers = {"Content-type": "application/json"}
+                resp = requests.post(
+                    app.config["OBSERVATIONS_ENDPOINT"],
+                    data=json.dumps(payload),
+                    headers=headers,
+                )
+                # resp = requests.post("http://host.docker.internal:1337/observation", data=json.dumps(payload), headers=headers)
+
+            return success_response_object, success_code
 
         except Exception as e:
-            #avroProducer.flush()
-            elastic_apm.capture_exception()
-            return failure_response_object,failure_code
+            logging.error("Error at %s", "data to kafka", exc_info=e)
+            return failure_response_object, failure_code
 
     return app
