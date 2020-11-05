@@ -97,7 +97,7 @@ def create_app(script_info=None):
                         "datastream_id": ds_id,
                         "featureofintrest_link": None,
                     }
-                    logging.info(observation)
+                    #logging.info(observation)
 
                 payload = {"topic": topic, "observation": observation}
 
