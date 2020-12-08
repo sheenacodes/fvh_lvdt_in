@@ -66,7 +66,7 @@ def create_app(script_info=None):
             # logging.info(f"post observation: {request.text()}")
             data = request.get_json()
             # uncomment for prod
-            logging.info(f"post observation: {data}")
+            #logging.info(f"post observation: {data}")
 
             topic = "finest-observations-itracklvdt"
 
